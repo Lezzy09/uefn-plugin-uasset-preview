@@ -70,7 +70,7 @@
     return e;
   }
   // long names wrap after a dot or before a capital, never in the middle of a word
-  function soft(text) { return String(text || "").replace(/\./g, ".​").replace(/([a-z])([A-Z])/g, "$1​$2"); }
+  function soft(text) { return String(text || "").replace(/\./g, ".\\u200B").replace(/([a-z])([A-Z])/g, "$1\\u200B$2"); }
   function chip(text, cls) { return el("span", "chip" + (cls ? " " + cls : ""), text); }
 
   function create(host, opts) {

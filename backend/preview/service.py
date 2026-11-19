@@ -17,7 +17,7 @@ from .kinds import (
     supports_texture_preview,
 )
 from .paths import disk_path_to_asset_path, is_previewable_binary
-from .thumbnail import extract_embedded_thumbnail
+from .thumbnail import extract_embedded_thumbnail, extract_source_image
 from .widget_tree import summarize_widget_tree
 from .verse_link import find_verse_source, stem_from_relative_path
 from frontend.settings import PANEL_LISTENER_PORT
@@ -139,8 +139,11 @@ def preview_project_asset(relative_path: str) -> dict[str, Any]:
     size = int(stat.get("size") or 0)
 
     out = _preview_project_asset(rel, mtime_ns, size)
-    if out.get("preview_kind") == "widget" and (out.get("mode") != "image" or out.get("stale")):
+    mode = out.get("mode")
+    is_widget = out.get("preview_kind") == "widget"
+    if (is_widget and (mode != "image" or out.get("stale"))) or (not is_widget and mode == "asset"):
         # Widget Blueprints have no UEFN export; their saved designer thumbnail is the preview.
+        # Anything else that would show a badge (mode "asset"): source image or saved thumbnail.
         thumb = _embedded_thumbnail_preview(
             rel,
             mtime_ns,
@@ -328,9 +331,15 @@ def _embedded_thumbnail_preview(
     asset_class: str = "",
     asset_path: str = "",
 ) -> dict[str, Any] | None:
-    """Serve the Content Browser thumbnail stored in the .uasset (no UEFN needed)."""
+    """Serve the imported source image, else the Content Browser thumbnail in the .uasset (no UEFN)."""
+    source = "embedded_thumbnail"
     try:
-        image = extract_embedded_thumbnail(pf.resolve_project_file_path(rel))
+        disk_path = pf.resolve_project_file_path(rel)
+        image = extract_source_image(disk_path)
+        if image:
+            source = "source_file"
+        else:
+            image = extract_embedded_thumbnail(disk_path)
     except Exception:
         return None
     if not image:
@@ -343,7 +352,7 @@ def _embedded_thumbnail_preview(
         mode=mode,
         asset_class=asset_class,
         asset_path=asset_path,
-        source="embedded_thumbnail",
+        source=source,
     )
 
 
@@ -487,6 +496,10 @@ def _load_uefn_image_preview(relative_path: str, *, expected: str) -> dict[str, 
             out["ok"] = True
             out["from_cache"] = True
             return _annotate_preview(out, rel)
+        # mode "image", not expected: the next online open still exports the real one.
+        fallback = _embedded_thumbnail_preview(rel, mtime_ns, size, mode="image", asset_class=label)
+        if fallback is not None:
+            return fallback
         return {
             "ok": False,
             "error": f"UEFN is offline — start UEFN to preview {expected}s.",

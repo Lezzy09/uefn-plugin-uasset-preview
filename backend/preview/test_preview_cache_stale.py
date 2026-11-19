@@ -381,3 +381,71 @@ def test_load_material_preview_falls_back_to_embedded_when_capture_fails(monkeyp
     out = preview_service.load_material_preview("Content/RankIcons/Gold_Rank_1_Mat.uasset")
     assert out["ok"] is True, out
     assert out["from_embedded_thumbnail"] is True
+
+
+def _texture_asset(tmp_path, source_name, md5):
+    import struct
+
+    jpeg = b"\xff\xd8\xff\xe0" + b"thumb" + b"\xff\xd9"
+    import_data = (
+        '[{ "RelativeFilename" : "%s", "Timestamp" : "1", "FileMD5" : "%s", "DisplayLabelName" : "" }]'
+        % (source_name, md5)
+    ).encode()
+    folder = tmp_path / "Content" / "Phone" / "Textures"
+    folder.mkdir(parents=True)
+    asset = folder / "T_Day.uasset"
+    asset.write_bytes(b"pkg" * 40 + import_data + struct.pack("<iii", 256, -256, len(jpeg)) + jpeg)
+    return asset
+
+
+def _offline_texture(monkeypatch, asset):
+    monkeypatch.setattr(preview_service, "_listener_online", lambda: False)
+    monkeypatch.setattr(preview_service.pf, "resolve_project_file_path", lambda rel: str(asset))
+    monkeypatch.setattr(preview_service.pf, "_project_root", lambda: asset.parents[3])
+    monkeypatch.setattr(preview_service, "find_verse_source", lambda *a, **k: None)
+    monkeypatch.setattr(
+        preview_service.pf,
+        "stat_project_file",
+        lambda path: {"exists": True, "mtime_ns": 4, "size": 9, "path": path},
+    )
+
+
+def test_offline_texture_shows_source_image_instead_of_badge(monkeypatch, tmp_path):
+    import hashlib
+
+    src = tmp_path / "src" / "T_Day.png"
+    src.parent.mkdir()
+    src.write_bytes(b"\x89PNG\r\n\x1a\nsource")
+    # Relative with extra ../ like UEFN writes: resolves from the drive root.
+    rel_name = "../../../../../../../../../../" + str(src).replace("\\", "/").split(":", 1)[-1].lstrip("/")
+    asset = _texture_asset(tmp_path, rel_name, hashlib.md5(src.read_bytes()).hexdigest())
+    _offline_texture(monkeypatch, asset)
+
+    out = preview_service.preview_project_asset("Content/Phone/Textures/T_Day.uasset")
+    assert out["mode"] == "image"
+    assert out["from_source_file"] is True
+
+    tex = preview_service.load_texture_preview("Content/Phone/Textures/T_Day.uasset")
+    assert tex["ok"] is True and tex["mode"] == "image", tex
+
+
+def test_offline_texture_falls_back_to_embedded_thumbnail(monkeypatch, tmp_path):
+    # Source gone (deleted scratch folder): the saved thumbnail, never a badge.
+    asset = _texture_asset(tmp_path, "C:/nowhere/T_Day.png", "")
+    _offline_texture(monkeypatch, asset)
+
+    out = preview_service.preview_project_asset("Content/Phone/Textures/T_Day.uasset")
+    assert out["mode"] == "image"
+    assert out["from_embedded_thumbnail"] is True
+
+    tex = preview_service.load_texture_preview("Content/Phone/Textures/T_Day.uasset")
+    assert tex["ok"] is True and tex["from_embedded_thumbnail"] is True, tex
+
+
+def test_source_image_skipped_when_edited_since_import(tmp_path):
+    from .thumbnail import extract_source_image
+
+    src = tmp_path / "T_Day.png"
+    src.write_bytes(b"changed")
+    asset = _texture_asset(tmp_path, str(src).replace("\\", "/"), "0" * 32)
+    assert extract_source_image(asset) is None

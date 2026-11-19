@@ -200,7 +200,7 @@
     document.getElementById("btn-mesh").hidden = !r.supports_mesh_preview;
     document.getElementById("btn-mat").hidden = !r.supports_material_preview;
     document.getElementById("btn-tex").hidden = !r.supports_texture_preview;
-    if (!r.listener_online) setBanner("UEFN listener offline — showing local badge / cached preview.");
+    if (!r.listener_online) setBanner("UEFN offline — showing the source image or saved thumbnail. Start UEFN for the full preview.");
     else setBanner("");
   }
 
